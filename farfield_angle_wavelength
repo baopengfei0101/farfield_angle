@@ -1,0 +1,112 @@
+################################################################内容
+# 宽谱角谱分解与圆偏振分析脚本
+# 功能：从监视器 "T" 读取多波长场数据，计算各波长的 RCP/LCP 远场分布
+################################################################
+
+# 1. 数据提取
+monitor_name = "monitor_(1.0025)";
+E = getresult(monitor_name, "E");
+f = E.f;             # 获取频率矢量
+lambda = E.lambda;   # 获取波长矢量
+x = E.x;
+y = E.y;
+num_f = length(f);    # 频率点数
+
+# 2. 参数设置与预分配
+res_k = 100;         # k空间采样率
+I_rcp_all = matrix(res_k, res_k, num_f); # 预分配矩阵提高效率
+I_lcp_all = matrix(res_k, res_k, num_f);
+
+# 3. 循环遍历每一个波长/频率点
+for(i=1:num_f) {
+    
+    # 提取当前频率下的电场分量 (切片处理)
+    # 假设监视器为2D平面，维度通常为 [x, y, 1, f]
+    E1x = pinch(E.Ex(1:length(x), 1:length(y), 1, i));
+    E1y = pinch(E.Ey(1:length(x), 1:length(y), 1, i));
+    
+    # 计算当前频率对应的物理参数
+    f_current = f(i);
+    k0 = 2*pi*f_current/c;
+    
+    # 定义当前的 k 空间网格
+    kx = linspace(-k0, k0, res_k);
+    ky = kx;
+    
+    # 执行角谱分解 (CZT 变换)
+    # 注意：此处坐标顺序与监视器定义一致
+    Exf = czt(E1x, x, y, kx, ky);
+    Eyf = czt(E1y, x, y, kx, ky);
+    
+    # 圆偏振分量分解 (RCP/LCP)
+    E_rcp = (Exf - 1i*Eyf)/sqrt(2);
+    E_lcp = (Exf + 1i*Eyf)/sqrt(2);
+    
+    # 计算强度并存入总矩阵
+    I_rcp_all(1:res_k, 1:res_k, i) = abs(E_rcp)^2;
+    I_lcp_all(1:res_k, 1:res_k, i) = abs(E_lcp)^2;
+    
+    # (可选) 打印进度
+    if (mod(i, 5) == 0) { 
+        ? "Processing wavelength: " + num2str(lambda(i)*1e9) + " nm (" + num2str(i) + "/" + num2str(num_f) + ")";
+    }
+}
+
+# 4. 结果可视化 (以中心波长为例)
+mid_idx = ceil(num_f/2);
+current_k_norm = linspace(-1, 1, res_k);
+
+image(current_k_norm, current_k_norm, pinch(I_rcp_all(1:res_k, 1:res_k, mid_idx)), 
+      "kx/k0", "ky/k0", "RCP Intensity at " + num2str(lambda(mid_idx)*1e9) + "nm");
+
+image(current_k_norm, current_k_norm, pinch(I_lcp_all(1:res_k, 1:res_k, mid_idx)), 
+      "kx/k0", "ky/k0", "LCP Intensity at " + num2str(lambda(mid_idx)*1e9) + "nm");
+
+# 5. (可选) 将结果封装为数据集以便在 Visualizer 中查看随频率的变化
+LCP_dist = matrixdataset("LCP_Farfield");
+LCP_dist.addparameter("kx_k0", current_k_norm);
+LCP_dist.addparameter("ky_k0", current_k_norm);
+LCP_dist.addparameter("lambda", lambda);
+LCP_dist.addattribute("I_lcp", I_rcp_all);
+
+visualize(LCP_dist);
+
+################################################################
+# 6. 提取 ky=0 处的 1D 随频率分布切片 (kx-lambda Map)
+################################################################
+
+ky_axis = current_k_norm;
+ky_idx = find(ky_axis, 0); 
+
+# 提取数据
+temp_rcp = pinch(I_rcp_all(1:res_k, ky_idx, 1:num_f)); # 维度 [kx, f]
+temp_lcp = pinch(I_lcp_all(1:res_k, ky_idx, 1:num_f)); # 维度 [kx, f]
+
+# 为了匹配 image(lambda, kx, ...) 的绘图顺序，进行转置
+# 转置后维度变为 [f, kx]
+I_rcp_kx_f = transpose(temp_rcp);
+I_lcp_kx_f = transpose(temp_lcp);
+
+################################################################
+# 7. 数据可视化与打包
+################################################################
+
+# 此时 lambda (num_f) 对应 I_rcp_kx_f 的第一维
+# current_k_norm (res_k) 对应 I_rcp_kx_f 的第二维
+image(lambda*1e9, current_k_norm, I_lcp_kx_f, 
+      "Wavelength (nm)", "kx/k0", "RCP Intensity Slice (ky=0)");
+
+# 8. 保存为 .mat 文件 (保持逻辑一致性)
+results = struct;
+results.lambda = lambda;
+results.kx_k0 = current_k_norm;
+results.ky_k0 = current_k_norm;
+results.I_rcp_full = I_rcp_all;
+results.I_lcp_full = I_lcp_all;
+results.I_rcp_slice_ky0 = I_rcp_kx_f; # 存储为 [f, kx] 格式
+results.I_lcp_slice_ky0 = I_lcp_kx_f;
+
+save_name = "Circular_Polarization_Analysis.mat";
+matlabsave(save_name, results);
+
+? "Fixed Success: Data saved to " + save_name;
