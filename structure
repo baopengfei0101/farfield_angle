@@ -1,0 +1,94 @@
+deleteall;
+##############################################
+# Rounded Rectangle Array with Individual Rotations
+##############################################
+deleteall;
+
+# --- 1. 用户定义参数 ---
+# 定义旋转角度数组 (单位: degrees)，数组长度将决定结构数量
+theta_array = [0, 30, 60, 90, 120, 150]; 
+num_elements = length(theta_array); # 自动获取结构总数
+
+#pitch_x = 950e-9; # 阵列间距 (950nm)
+
+# 基础几何参数 (通常由 Analysis Group 的脚本属性提供)
+res = %res%;
+x_span = %x span%;
+y_span = %y span%;
+z_span = %z span%;
+radius = %radius%;
+material = %material%;
+index = %index%;
+
+# --- 2. 生成单体基础顶点矩阵 V (未旋转状态) ---
+V_base = matrix(2, res*4); 
+xc = x_span/2 - radius;
+yc = y_span/2 - radius;
+x_centers = [xc, xc, -xc, -xc];
+y_centers = [yc, -yc, -yc, yc];
+
+for (i=1:4) {
+    theta = (i-1)*pi/2 + linspace(0, pi/2, res);
+    x_tmp = matrix(res);
+    y_tmp = matrix(res);
+    x0 = x_centers(i);
+    y0 = y_centers(i);
+
+    for (k=1:res) {
+        xt = x0 + radius*sin(theta(k));
+        yt = y0 + radius*cos(theta(k));
+        
+        # 边界检查逻辑 (保持原逻辑不变)
+        if(i==1){
+            if(yt<0) { x_tmp(k)=x0+sqrt(radius^2-y0^2); y_tmp(k)=0; }
+            else if(xt<0) { x_tmp(k)=0; y_tmp(k)=y0+sqrt(radius^2-x0^2); }
+            else { x_tmp(k)=xt; y_tmp(k)=yt; }
+        }
+        if(i==2){
+            if(yt>0) { x_tmp(k)=x0+sqrt(radius^2-y0^2); y_tmp(k)=0; }
+            else if(xt<0) { x_tmp(k)=0; y_tmp(k)=y0-sqrt(radius^2-x0^2); }
+            else { x_tmp(k)=xt; y_tmp(k)=yt; }
+        }
+        if(i==3){
+            if(yt>0) { x_tmp(k)=x0-sqrt(radius^2-y0^2); y_tmp(k)=0; }
+            else if(xt>0) { x_tmp(k)=0; y_tmp(k)=y0-sqrt(radius^2-x0^2); }
+            else { x_tmp(k)=xt; y_tmp(k)=yt; }
+        }
+        if(i==4){
+            if(yt<0) { x_tmp(k)=x0-sqrt(radius^2-y0^2); y_tmp(k)=0; }
+            else if(xt>0) { x_tmp(k)=0; y_tmp(k)=y0+sqrt(radius^2-x0^2); }
+            else { x_tmp(k)=xt; y_tmp(k)=yt; }
+        }
+    }
+    V_base(1, 1+(i-1)*res : i*res) = x_tmp;
+    V_base(2, 1+(i-1)*res : i*res) = y_tmp;
+}
+
+# --- 3. 循环生成阵列并应用独立旋转 ---
+x_start = - (num_elements - 1) * pitch_x / 2; # 居中对齐
+
+for (j=1:num_elements) {
+    # 计算当前结构的旋转弧度
+    phi = theta_array(j) * pi / 180;
+    
+    # 应用 2D 旋转矩阵变换
+    # x' = x*cos(phi) - y*sin(phi)
+    # y' = x*sin(phi) + y*cos(phi)
+    V_rotated = matrix(2, res*4);
+    V_rotated(1,:) = V_base(1,:) * cos(phi) - V_base(2,:) * sin(phi);
+    V_rotated(2,:) = V_base(1,:) * sin(phi) + V_base(2,:) * cos(phi);
+    
+    # 创建并设置对象
+    addpoly;
+    set("name", "rounded_rect_" + num2str(j));
+    set("x", x_start + (j-1) * pitch_x);
+    set("y", 0);
+    set("z", 0);
+    set("z span", z_span);
+    set("vertices", V_rotated); # 载入旋转后的顶点
+    
+    set("material", material);
+    if(get("material")=="<Object defined dielectric>") { 
+        set("index", index); 
+    }
+}
