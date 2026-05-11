@@ -1,0 +1,60 @@
+#############################################################
+# FDTD PB 相位单元：修正后的稳健提取脚本
+#############################################################
+
+# 1. 定义监视器名称 (请确保这里对应你 XZ 监视器的实际名字)
+mon = "monitor"; 
+
+# 直接从监视器获取空间坐标和频率 (最安全的方法)
+x_raw = getdata(mon, "x");
+y_raw = getdata(mon, "y"); # 对于 XZ 监视器，y 通常是一个固定值
+z_raw = getdata(mon, "z");
+f_raw = getdata(mon, "f");
+
+# 2. 从扫参结果获取场数据 (扫参名: "fai2")
+Ex_sweep = getsweepresult("fai2", "Ex");
+Ey_sweep = getsweepresult("fai2", "Ey");
+
+# 提取扫参的角度变量
+theta_raw = Ex_sweep.fai; 
+
+# 提取电场数值矩阵 (属性名通常与 Sweep Results 里的 Name 一致)
+Ex_data = Ex_sweep.Ex;
+Ey_data = Ey_sweep.Ey;
+
+# 3. 合成圆偏振分量 (LCP 入射提取 RCP)
+# E_rcp = (Ex - i*Ey) / sqrt(2)
+Ercp_total = (Ex_data - 1i * Ey_data) / sqrt(2);
+Elcp_total = (Ex_data + 1i * Ey_data) / sqrt(2);
+
+# 4. 定义目标相位空间 (0 到 2*pi)
+phase_interp = linspace(0, 2*pi, 361); 
+theta_interp = (phase_interp / 2) * (180 / pi); 
+
+# 5. 获取维度
+nx = length(x_raw);
+ny = length(y_raw);
+nz = length(z_raw);
+nf = length(f_raw);
+np = length(theta_interp);
+
+# 6. 执行插值 (针对 XZ 平面，坐标轴顺序通常为 x, z, f, theta)
+# 注意：pinch 用于去掉长度为 1 的维度以便进行线性插值
+Ercp_new = interp(pinch(Ercp_total), x_raw, z_raw, theta_raw, x_raw, z_raw, theta_interp);
+Elcp_new = interp(pinch(Elcp_total), x_raw, z_raw, theta_raw, x_raw, z_raw, theta_interp);
+
+# 7. 维度重构并构建数据集 [nx, ny, nz, nf, np]
+target_size = [nx, ny, nz, nf, np];
+Ercp_final = reshape(Ercp_new, target_size);
+Elcp_final = reshape(Elcp_new, target_size);
+
+E_pb = rectilineardataset("E_field", x_raw, y_raw, z_raw);
+E_pb.addparameter("f", f_raw);
+E_pb.addparameter("phase", phase_interp); 
+E_pb.addattribute("E_rcp", Ercp_final);
+E_pb.addattribute("E_lcp", Elcp_final);
+
+# 8. 导出
+matlabsave("PB_Metalens_FDTD_XZ_Library", E_pb, phase_interp, theta_interp);
+
+? "Success: RCP and LCP field library generated.";
