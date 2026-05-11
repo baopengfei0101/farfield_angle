@@ -1,0 +1,58 @@
+#############################################################
+# PB 相位单元：LCP 入射提取 RCP 与 LCP 场分布
+#############################################################
+
+# 1. 提取原始数据及坐标
+Ep_raw = getsweepresult("fai1", "Ep"); 
+Es_raw = getsweepresult("fai1", "Es"); 
+
+x_raw = Ep_raw.x;
+y_raw = Ep_raw.y;
+z_raw = Ep_raw.z;
+f_raw = Ep_raw.f;
+theta_raw = Ep_raw.fai; 
+
+# 2. 合成 LCP 入射下的圆偏振分量
+# 逻辑：LCP 入射产生总场 E_total = (Ep + i*Es) / sqrt(2)
+# RCP = (E_total_x - i*E_total_y) / sqrt(2)
+# LCP = (E_total_x + i*E_total_y) / sqrt(2)
+
+# RCP 分量 (Cross-polarized, 携带 2*theta 相位)
+Ercp_total = 0.5 * (Ep_raw.Ex + 1i*Es_raw.Ex - 1i*Ep_raw.Ey + Es_raw.Ey);
+
+# LCP 分量 (Co-polarized, 携带 0 相位)
+Elcp_total = 0.5 * (Ep_raw.Ex + 1i*Es_raw.Ex + 1i*Ep_raw.Ey - Es_raw.Ey);
+
+# 3. 定义目标相位空间
+phase_interp = linspace(0, 2*pi, 361); 
+theta_interp = (phase_interp / 2) * (180 / pi); 
+
+# 4. 获取维度参数
+nx = length(x_raw);
+ny = length(y_raw);
+nz = length(z_raw);
+nf = length(f_raw);
+np = length(phase_interp);
+
+# 5. 执行相位维度插值 (针对复数标量场)
+Ercp_new = interp(pinch(Ercp_total), x_raw, z_raw, theta_raw, x_raw, z_raw, theta_interp);
+Elcp_new = interp(pinch(Elcp_total), x_raw, z_raw, theta_raw, x_raw, z_raw, theta_interp);
+
+# 6. 维度重构 [nx, ny, nz, nf, np]
+target_size = [nx, ny, nz, nf, np];
+Ercp_final = reshape(Ercp_new, target_size);
+Elcp_final = reshape(Elcp_new, target_size);
+
+# 7. 构建数据集
+E_pb = rectilineardataset("E_field", x_raw, y_raw, z_raw);
+E_pb.addparameter("f", f_raw);
+E_pb.addparameter("phase", phase_interp); 
+
+# 添加两个属性：RCP 和 LCP
+E_pb.addattribute("E_rcp", Ercp_final);
+E_pb.addattribute("E_lcp", Elcp_final);
+
+# 8. 导出数据
+matlabsave("PB_Metalens_LCP_Incident_Full_Library", E_pb, phase_interp, theta_interp);
+
+? "Success: RCP and LCP field library generated.";
